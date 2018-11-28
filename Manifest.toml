@@ -83,3 +83,11 @@ uuid = "cf7118a7-6976-5b1a-9a39-7adc72f591a4"
 
 [[Unicode]]
 uuid = "4ec0a83e-493e-50e2-b9ac-8f72acf5a8f5"
+
+[[WaylandCore]]
+deps = ["FixedPointNumbers", "Sockets"]
+git-tree-sha1 = "4f0a83ffe1af96189a305f5cbeb7c70821ef3a06"
+repo-rev = "master"
+repo-url = "https://github.com/Deuxis/WaylandCore.jl"
+uuid = "dbf96336-f34e-11e8-1839-07066ae9385e"
+version = "0.1.0"
