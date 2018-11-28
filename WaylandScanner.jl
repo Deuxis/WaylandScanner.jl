@@ -89,7 +89,7 @@ struct SDescription <: ScannerStruct
 	summary::Union{AbstractString,Nothing} # attribute, required
 	content::Union{AbstractString,Nothing} # childnode (text content of the element), required
 end
-struct SEnumEntry
+struct SEnumEntry <: ScannerStruct
 	name::AbstractString # attribute, required. May be redundant because the entries are accessed in the Dict by name anyway.
 	value::WlUInt # attribute, required
 	since::WlVersion # attribute, implied
@@ -392,6 +392,20 @@ function show(io::IO, mime::MIME"text/plain", o::SCollection)
 		for member in o
 			show(IOContext(io, :indent=>indent_level), mime, member)
 		end
+	end
+end
+"""
+    show(io::IO, mime::MIME"text/plain", o::Dict{Symbol,<: ScannerStruct})
+
+Pretty-print a Symbol `Dict` of `ScannerStruct`s.
+"""
+function show(io::IO, mime::MIME"text/plain", o::Dict{Symbol,<: ScannerStruct})
+	indent_level = get(io, :indent, 0)
+	indent = getindent(indent_level, indent1)
+	print(io, '\n')
+	for (key, val) in o
+		print(io, "$indent$key:\n")
+		show(IOContext(io, :indent=>indent_level + 1), mime, val)
 	end
 end
 """
