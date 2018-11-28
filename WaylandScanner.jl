@@ -54,6 +54,18 @@ end
 # Utility types:
 const WlVersion = Int
 const WlMsgType = Union{WlInt,WlUInt,WlFixed,WlString,WlID,WlArray,WlFD} # message argument types
+"""
+    typewrap(u)
+
+Get a Type Union that matches all types in u.
+"""
+typewrap(u) = u isa Union ? Union{Type{u.a}, typewrap(u.b)} : Type{u}
+"""
+    TypeofWlMsgType
+
+The type that matches all (and only) types in WlMsgType
+"""
+const TypeofWlMsgType = typewrap(WlMsgType)
 
 @enum RequestType none destructor
 
@@ -93,7 +105,7 @@ struct SEnum <: ScannerStruct
 end
 struct SArgument <: ScannerStruct
 	name::AbstractString # attribute, required. If the XML is non-compliant, this may be non-existant and still able to work, but the arguments to actual functions are named after it, so making it optional is TODO.
-	type::Union{DataType,UnionAll} # attribute, required
+	type::TypeofWlMsgType # attribute, required
 	summary::Union{AbstractString,Nothing} # attribute, implied
 	interface::Union{AbstractString,Nothing} # attribute, implied. If the argument is of type "object", this describes its interface. XXX: Needs later conversion!
 	nullable::Bool # attribute, implied
@@ -127,14 +139,14 @@ struct SProtocol <: ScannerStruct
 	interfaces::Set{SInterface} # childnodes, required (at least one)
 end
 # scanner structs helpers
+"""
+    imply_since(s)
+
+Imply the "since" attribute, resolving to 1 if it's not present and valid.
+"""
 imply_since(::Nothing) = 1
 imply_since(s::AbstractString) = (since = tryparse(WlVersion, s)) == nothing ? nothing : since
-#= Old version of the above:
-function imply_since(s::AbstractString)
-	since = tryparse(WlVersion, s)
-	since == nothing ? 1 : since
-end=#
-function parse_wlmsgtype(ts::AbstractString)::Union{DataType,UnionAll}
+function parse_wlmsgtype(ts::AbstractString)::TypeofWlMsgType
 	if ts == "int"
 		WlInt
 	elseif ts == "uint"
@@ -156,12 +168,18 @@ function parse_wlmsgtype(ts::AbstractString)::Union{DataType,UnionAll}
 	end
 end
 """
+    flatten(s::AbstractString)
+
+Flatten a formatted string into a simple, one-line one. Strip all trailing and leading whitespace and change all interior whitespace into a single space.
+"""
+flatten(s::AbstractString) = replace(strip(s), r"\s+"=>" ")
+"""
 	ScannerStruct(::XMLElement)
 
 Do note that all these constructors trust the element to actually be their XML counterpart, the caller is responsible for supplying correct element nodes.
 """
 function SDescription(element::XMLElement)
-	econtent = content(element)
+	econtent = flatten(content(element))
 	econtent = econtent == "" ? nothing : econtent
 	SDescription(attribute(element, "summary"), econtent)
 end
@@ -343,7 +361,8 @@ function show(io::IO, mime::MIME"text/plain", o::ScannerStruct)
 		if prop == nothing
 			print("$indent$indent1$fname: none")
 		elseif prop isa ScannerStruct
-			show(IOContext(io, :indent=>indent_level + 1), mime, prop)
+			print("$indent$indent1$fname:\n")
+			show(IOContext(io, :indent=>indent_level + 2), mime, prop)
 		elseif prop isa Set{<: ScannerStruct}
 			print(io, "$indent$indent1$fname:")
 			show(IOContext(io, :indent=>indent_level + 2), mime, prop)
@@ -381,8 +400,8 @@ function show(io::IO, ::MIME"text/plain", o::SDescription)
 	else
 		indent_level = get(io, :indent, 0)
 		indent = getindent(indent_level, indent1)
-		summary = o.summary == nothing ? "none" : o.summary[1:min(100, end)] * "…"
-		content = o.content == nothing ? "none" : o.content[1:min(100, end)] * "…"
+		summary = o.summary == nothing ? "none" : length(o.summary) >= 100 ? o.summary[1:100] * "…" : o.summary
+		content = o.content == nothing ? "none" : length(o.content) >= 100 ? o.content[1:100] * "…" : o.content
 		print(io, "$(indent)Description:\n$(indent)$(indent1)summary: $summary\n$(indent)$(indent1)content: $content")
 	end
 end
