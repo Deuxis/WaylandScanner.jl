@@ -468,8 +468,8 @@ protocol_files = Set("/usr/share/wayland/wayland.xml", "/usr/share/wayland-proto
 protocols = reduce(append!, wlparse.(protocol_files))
 ```
 """
-function wlparse(file::AbstractString)
-	xdoc = parse_file("/usr/share/wayland/wayland.xml")
+function wlparse(path::AbstractString)
+	xdoc = parse_file(path)
 	finalizer(free, xdoc)
 	wlparse(root(xdoc))
 end
