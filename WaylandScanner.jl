@@ -117,13 +117,13 @@ struct SRequest <: ScannerStruct
 	since::WlVersion # attribute, implied
 	rtype::RequestType # attribute, implied
 	description::Union{SDescription,Nothing} # childnode, optional
-	args::Array{SArgument,1} # childnodes, optional
+	args::Union{Array{SArgument,1}, Nothing} # childnodes, optional
 end
 struct SEvent <: ScannerStruct
 	name::AbstractString # attribute, required
 	since::WlVersion # attribute, implied
 	description::Union{SDescription,Nothing} # childnode, optional
-	args::Array{SArgument,1} # childnodes, optional
+	args::Union{Array{SArgument,1}, Nothing} # childnodes, optional
 end
 struct SInterface <: ScannerStruct
 	name::AbstractString # attribute, required
