@@ -3,11 +3,11 @@ A Julia module for parsing Wayland protocol files and :unicorn:generating Julia 
 
 Heavily work in progress.
 
-| Functionality | Status |
-| ------------- | ------ |
-| parsing XML protocol files | mostly done
-| pretty-printing the parsed tree | mostly done
-| generating Julia bindings | not even started
+| Functionality                   | Status          |
+| ------------------------------- | --------------- |
+| parsing XML protocol files      | done (unstable) |
+| pretty-printing the parsed tree | done (unstable) |
+| generating Julia bindings       | not yet started |
 
 ## Installing
 ```julia-repl
