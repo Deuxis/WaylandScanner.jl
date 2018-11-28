@@ -333,14 +333,18 @@ stype(::SEnum) = "Enum"
 stype(::SEnumEntry) = "Enum entry"
 stype(::SArgument) = "Argument"
 stype(::SDescription) = "Description"
+"""
+    SCollection
 
+Any collection of `ScannerStruct`s.
+"""
+const SCollection = Union{Set{<: ScannerStruct},Array{<: ScannerStruct},Dict{<: Any,<: ScannerStruct}}
 """
     getindent(count::Integer, s::AbstractString = "\t")
 
 Get an indent string from the indentation depth (count) and a string representing an indentation level.
 """
 getindent(count::Integer, s::AbstractString = "\t") = repeat(s, count)
-
 """
 	indent1
 
@@ -365,7 +369,7 @@ function show(io::IO, mime::MIME"text/plain", o::ScannerStruct)
 		elseif prop isa ScannerStruct
 			print("$indent$indent1$fname:\n")
 			show(IOContext(io, :indent=>indent_level + 2), mime, prop)
-		elseif prop isa Set{<: ScannerStruct}
+		elseif prop isa SCollection
 			print(io, "$indent$indent1$fname:")
 			show(IOContext(io, :indent=>indent_level + 2), mime, prop)
 		else
@@ -379,13 +383,12 @@ end
 
 Pretty-print a `Set` of `ScannerStruct`s.
 """
-function show(io::IO, mime::MIME"text/plain", o::Set{<: ScannerStruct})
+function show(io::IO, mime::MIME"text/plain", o::SCollection)
 	if isempty(o)
 		print(io, " none")
 	else
 		print(io, '\n')
 		indent_level = get(io, :indent, 0)
-		indent = getindent(indent_level, indent1)
 		for member in o
 			show(IOContext(io, :indent=>indent_level), mime, member)
 		end
