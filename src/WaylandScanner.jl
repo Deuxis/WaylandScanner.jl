@@ -1,28 +1,14 @@
 module WaylandScanner
+
+export wlparse
+
 import Base.show
 using Base: finalizer
 using WaylandCore
 using LightXML
 
-export wlparse
-
-# Utility
-"""
-    typewrap(u)
-
-Get a Type Union that matches all types in u.
-"""
-typewrap(u) = u isa Union ? Union{Type{u.a}, typewrap(u.b)} : Type{u}
-"""
-    TypeofWlMsgType
-
-The type that matches all (and only) types in WlMsgType
-"""
-const TypeofWlMsgType = typewrap(WlMsgType)
-
-@enum RequestType none destructor
-
 # Parsing
+@enum RequestType none destructor
 """
 	Scanner types
 
