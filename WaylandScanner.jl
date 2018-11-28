@@ -273,6 +273,7 @@ function SRequest(element::XMLElement)
 			push!(args, SArgument(child))
 		end
 	end
+	isempty(args) && (args = nothing)
 	SRequest(name, since, rtype, description, args)
 end
 function SEvent(element::XMLElement)
@@ -286,6 +287,7 @@ function SEvent(element::XMLElement)
 			push!(args, SArgument(child))
 		end
 	end
+	isempty(args) && (args = nothing)
 	SEvent(name, since, description, args)
 end
 function SInterface(element::XMLElement)
