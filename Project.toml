@@ -5,4 +5,4 @@ version = "0.1.1"
 
 [deps]
 LightXML = "9c8b4983-aa76-5018-a973-4c85ecc9e179"
-WaylandCore = "dbf96336-f34e-11e8-1839-07066ae9385e"
+WaylandClientCore = "dbf96336-f34e-11e8-1839-07066ae9385e"

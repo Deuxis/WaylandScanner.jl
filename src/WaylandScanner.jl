@@ -4,7 +4,7 @@ export wlparse
 
 import Base.show
 using Base: finalizer
-using WaylandCore
+using WaylandClientCore
 using LightXML
 
 # Parsing
