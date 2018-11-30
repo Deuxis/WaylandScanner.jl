@@ -2,9 +2,9 @@ module WaylandScanner
 
 export wlparse
 
-import Base.show
+import Base.show, Base.read, Base.write
 using Base: finalizer
-using WaylandClientCore
+using WaylandCore
 using LightXML
 
 # Parsing
@@ -44,12 +44,18 @@ struct SEnum <: ScannerStruct
 end
 struct SArgument <: ScannerStruct
 	name::AbstractString # attribute, required. If the XML is non-compliant, this may be non-existant and still able to work, but the arguments to actual functions are named after it, so making it optional is TODO.
-	type::TypeofWlMsgType # attribute, required
+	type::TypeofAbstractWlMsgType # attribute, required
 	summary::Union{AbstractString,Nothing} # attribute, implied
 	interface::Union{AbstractString,Nothing} # attribute, implied. If the argument is of type "object", this describes its interface. XXX: Needs later conversion!
 	nullable::Bool # attribute, implied
 	enum::Union{AbstractString,Nothing} # attribute, implied. If the argument is actually an enum (has int or uint type and this attribute set), specifies which one is it. XXX: Needs later conversion!
 	description::Union{SDescription,Nothing} # childnode, optional
+end
+struct SEvent <: ScannerStruct
+	name::AbstractString # attribute, required
+	since::WlVersion # attribute, implied
+	description::Union{SDescription,Nothing} # childnode, optional
+	args::Union{Array{SArgument,1}, Nothing} # childnodes, optional
 end
 struct SRequest <: ScannerStruct
 	name::AbstractString # attribute, required
@@ -58,19 +64,13 @@ struct SRequest <: ScannerStruct
 	description::Union{SDescription,Nothing} # childnode, optional
 	args::Union{Array{SArgument,1}, Nothing} # childnodes, optional
 end
-struct SEvent <: ScannerStruct
-	name::AbstractString # attribute, required
-	since::WlVersion # attribute, implied
-	description::Union{SDescription,Nothing} # childnode, optional
-	args::Union{Array{SArgument,1}, Nothing} # childnodes, optional
-end
 struct SInterface <: ScannerStruct
 	name::AbstractString # attribute, required
 	version::WlVersion # attribute, required
 	description::Union{SDescription,Nothing} # childnode, optional
 	enums::Set{SEnum} # childnodes, optional
-	requests::Set{SRequest} # childnodes, optional
-	events::Set{SEvent} # childnodes, optional
+	requests::Array{SRequest} # childnodes, optional
+	events::Array{SEvent} # childnodes, optional
 end
 struct SProtocol <: ScannerStruct
 	name::AbstractString # attribute, required
@@ -85,7 +85,7 @@ Imply the "since" attribute, resolving to 1 if it's not present and valid.
 """
 imply_since(::Nothing) = 1
 imply_since(s::AbstractString) = (since = tryparse(WlVersion, s)) == nothing ? nothing : since
-function parse_wlmsgtype(ts::AbstractString)::TypeofWlMsgType
+function parse_wlmsgtype(ts::AbstractString)::TypeofAbstractWlMsgType
 	if ts == "int"
 		WlInt
 	elseif ts == "uint"
@@ -95,15 +95,15 @@ function parse_wlmsgtype(ts::AbstractString)::TypeofWlMsgType
 	elseif ts == "string"
 		WlString
 	elseif ts == "object"
-		WlID
+		WlObjID
 	elseif ts == "new_id"
-		WlID
+		WlNewID
 	elseif ts == "array"
 		WlArray
 	elseif ts == "fd"
 		WlFD
 	else
-		throw(ArgumentError("Wayland type \"$ts\" not recognised."))
+		throw(ArgumentError("Wayland message argument type \"$ts\" not recognised."))
 	end
 end
 """
@@ -117,83 +117,38 @@ flatten(s::AbstractString) = replace(strip(s), r"\s+"=>" ")
 
 Do note that all these constructors trust the element to actually be their XML counterpart, the caller is responsible for supplying correct element nodes.
 """
-function SDescription(element::XMLElement)
-	econtent = flatten(content(element))
-	econtent = econtent == "" ? nothing : econtent
-	SDescription(attribute(element, "summary"), econtent)
-end
-function SEnumEntry(element::XMLElement)
+function SProtocol(element::XMLElement)
 	name = attribute(element, "name"; required=true)
-	value = parse(WlUInt, attribute(element, "value"; required=true))
-	since = imply_since(attribute(element, "since"))
-	_summary = attribute(element, "summary")
-	_description = find_element(element, "description")
-	if	_description == nothing
-		description = nothing
-		summary = _summary
-	else
-		description = SDescription(_description)
-		if _summary == nothing
-			summary = description.summary
-		else
-			summary = _summary
-		end
-	end
-	SEnumEntry(name, value, since, summary, description)
-end
-function SEnum(element::XMLElement)
-	name = attribute(element, "name"; required=true)
-	since = imply_since(attribute(element, "since"))
-	_bitfield = attribute(element, "bitfield")
-	if	_bitfield == nothing
-		bitfield = false
-	else
-		bitfield = parse(Bool, _bitfield)
-	end
 	_description = find_element(element, "description")
 	description = _description == nothing ? nothing : SDescription(_description)
-	entries = Dict{Symbol,SEnumEntry}()
+	interfaces	= Set{SInterface}()
 	for child in child_elements(element)
-		if LightXML.name(child) == "entry"
-			entry = SEnumEntry(child)
-			entries[Symbol(entry.name)] = entry
+		if LightXML.name(child) == "interface"
+			push!(interfaces, SInterface(child))
 		end
 	end
-	SEnum(name, since, bitfield, description, entries)
+	SProtocol(name, description, interfaces)
 end
-function SArgument(element::XMLElement)
+function SInterface(element::XMLElement)
 	name = attribute(element, "name"; required=true)
-	type = parse_wlmsgtype(attribute(element, "type"; required=true))
-	if type != WlID
-		interface = nothing
-	else
-		interface = attribute(element, "interface")
-	end
-	_nullable = attribute(element, "nullable")
-	if	_nullable == nothing
-		nullable = false
-	else
-		nullable = parse(Bool, _nullable)
-	end
-	if type <: Integer
-		enum = attribute(element, "enum")
-	else
-		enum = nothing
-	end
+	_version = attribute(element, "version")
+	version  = _version == nothing ? 1 : parse(WlVersion, _version)
 	_description = find_element(element, "description")
-	_summary = attribute(element, "summary")
-	if	_description == nothing
-		description = nothing
-		summary = _summary
-	else
-		description = SDescription(_description)
-		if _summary == nothing
-			summary = description.summary
-		else
-			summary = _summary
+	description  = _description == nothing ? nothing : SDescription(_description)
+	enums = Set{SEnum}()
+	requests = Array{SRequest}()
+	events = Array{SEvent}()
+	for child in child_elements(element)
+		childname = LightXML.name(child)
+		if childname == "enum"
+			push!(enums, SEnum(child))
+		elseif childname == "request"
+			push!(requests, SRequest(child))
+		elseif childname == "event"
+			push!(events, SEvent(child))
 		end
 	end
-	SArgument(name, type, summary, interface, nullable, enum, description)
+	SInterface(name, version, description, enums, requests, events)
 end
 function SRequest(element::XMLElement)
 	name = attribute(element, "name"; required=true)
@@ -229,38 +184,83 @@ function SEvent(element::XMLElement)
 	isempty(args) && (args = nothing)
 	SEvent(name, since, description, args)
 end
-function SInterface(element::XMLElement)
+function SEnum(element::XMLElement)
 	name = attribute(element, "name"; required=true)
-	_version = attribute(element, "version")
-	version  = _version == nothing ? 1 : parse(WlVersion, _version)
-	_description = find_element(element, "description")
-	description  = _description == nothing ? nothing : SDescription(_description)
-	enums = Set{SEnum}()
-	requests = Set{SRequest}()
-	events = Set{SEvent}()
-	for child in child_elements(element)
-		childname = LightXML.name(child)
-		if childname == "enum"
-			push!(enums, SEnum(child))
-		elseif childname == "request"
-			push!(requests, SRequest(child))
-		elseif childname == "event"
-			push!(events, SEvent(child))
-		end
+	since = imply_since(attribute(element, "since"))
+	_bitfield = attribute(element, "bitfield")
+	if	_bitfield == nothing
+		bitfield = false
+	else
+		bitfield = parse(Bool, _bitfield)
 	end
-	SInterface(name, version, description, enums, requests, events)
-end
-function SProtocol(element::XMLElement)
-	name = attribute(element, "name"; required=true)
 	_description = find_element(element, "description")
 	description = _description == nothing ? nothing : SDescription(_description)
-	interfaces	= Set{SInterface}()
+	entries = Dict{Symbol,SEnumEntry}()
 	for child in child_elements(element)
-		if LightXML.name(child) == "interface"
-			push!(interfaces, SInterface(child))
+		if LightXML.name(child) == "entry"
+			entry = SEnumEntry(child)
+			entries[Symbol(entry.name)] = entry
 		end
 	end
-	SProtocol(name, description, interfaces)
+	SEnum(name, since, bitfield, description, entries)
+end
+function SEnumEntry(element::XMLElement)
+	name = attribute(element, "name"; required=true)
+	value = parse(WlUInt, attribute(element, "value"; required=true))
+	since = imply_since(attribute(element, "since"))
+	_summary = attribute(element, "summary")
+	_description = find_element(element, "description")
+	if	_description == nothing
+		description = nothing
+		summary = _summary
+	else
+		description = SDescription(_description)
+		if _summary == nothing
+			summary = description.summary
+		else
+			summary = _summary
+		end
+	end
+	SEnumEntry(name, value, since, summary, description)
+end
+function SArgument(element::XMLElement)
+	name = attribute(element, "name"; required=true)
+	type = parse_wlmsgtype(attribute(element, "type"; required=true))
+	if type != WlID
+		interface = nothing
+	else
+		interface = attribute(element, "interface")
+	end
+	_nullable = attribute(element, "nullable")
+	if	_nullable == nothing
+		nullable = false
+	else
+		nullable = parse(Bool, _nullable)
+	end
+	if type <: Integer
+		enum = attribute(element, "enum")
+	else
+		enum = nothing
+	end
+	_description = find_element(element, "description")
+	_summary = attribute(element, "summary")
+	if	_description == nothing
+		description = nothing
+		summary = _summary
+	else
+		description = SDescription(_description)
+		if _summary == nothing
+			summary = description.summary
+		else
+			summary = _summary
+		end
+	end
+	SArgument(name, type, summary, interface, nullable, enum, description)
+end
+function SDescription(element::XMLElement)
+	econtent = flatten(content(element))
+	econtent = econtent == "" ? nothing : econtent
+	SDescription(attribute(element, "summary"), econtent)
 end
 
 # utility functions
@@ -320,7 +320,7 @@ end
 """
     show(io::IO, mime::MIME"text/plain", o::Set{<: ScannerStruct})
 
-Pretty-print a `Set` of `ScannerStruct`s.
+Pretty-print a collection of `ScannerStruct`s.
 """
 function show(io::IO, mime::MIME"text/plain", o::SCollection)
 	if isempty(o)
@@ -367,9 +367,9 @@ end
 """
     wlparse(element::XMLElement)
 
-Parse an XMLElement into a `Set{Protocol}`.
+Parse an `XMLElement` into a `Set{Protocol}`.
 
-Returns a Set{SProtocol} so that when parsing multiple protocol files or even a file with multiple protocols they can all be easily merged via append!.
+Returns a `Set{SProtocol}` so that when parsing multiple protocol files or even a file with multiple protocols they can all be easily merged via `append!`.
 
 Example:
 ```julia
@@ -396,7 +396,7 @@ end
 """
     wlparse(path::AbstractString)
 
-Parse a file denoted by path.
+Parse a file denoted by `path`.
 
 Examples:
 ```julia
@@ -420,6 +420,123 @@ Parse the default Wayland protocol located at /usr/share/wayland/wayland.xml
 """
 function wlparse()
 	wlparse("/usr/share/wayland/wayland.xml")
+end
+
+# Constructing
+"""
+There are two actual message types, request and event. Request is a message we send, event is one we receive and need to listen to. The entire rest is up to us.
+
+When it comes to structure, I've chosen a simple approach. Don't care about protocols, as interfaces need to be unique anyway. Requests and `addlistener(listener, event)` methods are global and differentiated by multiple dispatch. Each interface acts as a collection of its requests, events and enums.
+Interfaces are struct subtypes of WaylandObject. As types, they are used for multiple dispatch.
+Because requests, events and enums may share names (for example `wl_display` has an `error` event and an `error` enum), their specific collections are separated into `requests`, `events` and `enums` properties of the `WaylandObject`, which is an instance of an interface. However, for convenience the `WaylandObject` itself acts as a collection of (request, event, enum) tuples.
+
+Examples:
+```julia-repl
+# Accessing a tuple (any non-existing value gets replaced by default_value _in the tuple_):
+julia> get(wl_display, :error, nothing)
+(nothing, WaylandEventMeta{wl_display, :error}, WaylandEnum(wl_display, :error, :invalid_object=>0, :invalid_method=>1, :no_memory=>2))
+# Accessing an event:
+julia> error_event = get(wl_display.events, :error, nothing)
+WaylandEventMeta{wl_display, :error}
+# Launching a request:
+julia> get_registry(wl_display)
+# Launching a request with arguments:
+julia> bind(wl_registry, 1)
+# Adding an event listener:
+julia> addlistener(listener, error_event)
+```
+"""
+abstract type WaylandObject end
+"""
+	struct WaylandRequestMeta{object, rname}(opcode, args)
+
+Request meta object. Describes a request and allows dispatching on concrete requests. Create an instance only if you want to describe a request - for dispatching use the automatically generated instance or the parametrised type itself.
+
+`target` (and the `object` parameter): the interface the request will be targeted for
+`name`: the name of the request
+`opcode`: opcode of the request. Depends on the order the request is listed in, counting from 0. For example, wl_display::sync is listed first (and therefore is in the wl_display's requests array at index 1), so its opcode is 0 (index - 1).
+`args`: A Vector of name=>type pairs, describing the arguments in order.
+
+As an example, for the `get_registry` request of `wl_display` the Scanner will create this:
+```julia
+# opcode is determined from request index during iteration
+rname = :get_registry
+wl_display.requests[rname] = WaylandRequestMeta{wl_display.interface, rname}(opcode, [:registry=>WlNewID])
+```
+Such struct semantically describes the `wl_display::get_registry` request of the Wayland Protocol and corresponds to the generated C API function `wl_display_get_registry(wl_display * display, new_id_t registry)`
+Then, from that, the Scanner will generate the request function:
+```julia
+# get_registry(display::WlDisplay)
+@exec $rname(display::$(typeof(wl_display))) = send_request(display, wl_display.requests[rname], get_newid())
+```
+new_id arguments aren't presented to the user, but are acquired by the get_newid call inside the function, so the result in this case is a request function with just one argument, the target.
+"""
+struct WaylandRequestMeta{object, rname}
+	target::WaylandObject
+	name::Symbol
+	opcode::UInt16
+	args::Vector{Pair{Symbol, TypeofAbstractWlMsgType}}
+	WaylandRequestMeta{object, rname}(opcode, args) where rname where object = new(object, rname, opcode, args)
+end
+"""
+	struct WaylandEventMeta{object, ename}(opcode, args)
+
+Event meta object. Describes an event and allows dispatching on concrete events. Create an instance only if you want to describe an event - for dispatching use the automatically generated instance or the parametrised type itself.
+"""
+struct WaylandEventMeta
+	source::WaylandObject
+	name::Symbol
+	opcode::UInt16
+	args::Vector{Pair{Symbol, TypeofAbstractWlMsgType}}
+end
+"""
+	struct WaylandEvent{object, ename}(opcode, args)
+
+Decoded event message.
+"""
+struct WaylandEvent{object, ename}
+	source::WaylandObject
+	name::Symbol
+	opcode::UInt16
+	args::Vector{Pair{Symbol, TypeofAbstractWlMsgType}}
+	WaylandEvent{object, ename}(opcode, args) where ename where object = new(object, ename, opcode, args)
+end
+
+# Library core functions
+"""
+	send_request(sender::WlID, request::WaylandRequestMeta, args...)
+
+Create the request message and send it.
+
+This is part of the low level interface used by the generated library. You probably want the generated functions instead.
+"""
+function send_request(io::IO, sender::WlID, request::WaylandRequestMeta, args::WlMsgType...)
+	size = 8 # just the header
+	if isempty(args)
+		payload = nothing
+	else
+		payload = IOBuffer()
+		for arg in args
+			size += write(payload, arg)
+		end
+	end
+	send(io, GenericMessage(sender, size, request.opcode, payload))
+end
+"""
+    receive_event(io::IO; msg_type=GenericMessage)
+
+Receive an event message and decode it into a `WaylandEvent` object.
+
+This is part of the low level interface used by the generated library. You probably want the generated high-level event listening utilities instead.
+"""
+function receive_event(io::IO, msg_type=GenericMessage)
+	receive(io, msg_type)
+end
+
+struct WaylandEnum
+	owner::WaylandObject
+	name::Symbol
+	entries::Dict{Symbol, Integer}
 end
 
 end  # module WaylandScanner

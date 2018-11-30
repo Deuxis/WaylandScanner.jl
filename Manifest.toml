@@ -84,10 +84,10 @@ uuid = "cf7118a7-6976-5b1a-9a39-7adc72f591a4"
 [[Unicode]]
 uuid = "4ec0a83e-493e-50e2-b9ac-8f72acf5a8f5"
 
-[[WaylandClientCore]]
+[[WaylandCore]]
 deps = ["FixedPointNumbers", "Sockets"]
-git-tree-sha1 = "59b779c50a0726189488cc3d7857468bf1e39d98"
+git-tree-sha1 = "f325bc97981f9c27f4b6959fc80bcadd21961f09"
 repo-rev = "master"
-repo-url = "https://github.com/Deuxis/WaylandClientCore.jl"
+repo-url = "https://github.com/Deuxis/WaylandCore.jl"
 uuid = "dbf96336-f34e-11e8-1839-07066ae9385e"
 version = "0.1.1"
