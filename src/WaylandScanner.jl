@@ -320,7 +320,7 @@ end
 """
     show(io::IO, mime::MIME"text/plain", o::Set{<: ScannerStruct})
 
-Pretty-print a collection of `ScannerStruct`s.
+Pretty-print a collection of [`ScannerStruct`](@ref)s.
 """
 function show(io::IO, mime::MIME"text/plain", o::SCollection)
 	if isempty(o)
@@ -336,7 +336,7 @@ end
 """
     show(io::IO, mime::MIME"text/plain", o::Dict{Symbol,<: ScannerStruct})
 
-Pretty-print a Symbol `Dict` of `ScannerStruct`s.
+Pretty-print a [`Symbol`](@ref) [`Dict`](@ref) of [`ScannerStruct`](@ref)s.
 """
 function show(io::IO, mime::MIME"text/plain", o::Dict{Symbol,<: ScannerStruct})
 	indent_level = get(io, :indent, 0)
@@ -350,7 +350,7 @@ end
 """
 	show(io::IO, ::MIME"text/plain", o::SDescription)
 
-Show an SDescription in a human readable indented format, shortening the strings.
+Show an [`SDescription`](@ref) in a human readable indented format, shortening the strings.
 """
 function show(io::IO, ::MIME"text/plain", o::SDescription)
 	if o.summary == nothing && o.content == nothing
@@ -367,7 +367,7 @@ end
 """
     wlparse(element::XMLElement)
 
-Parse an `XMLElement` into a `Set{Protocol}`.
+Parse an [`XMLElement`](@ref) into a `Set{SProtocol}`.
 
 Returns a `Set{SProtocol}` so that when parsing multiple protocol files or even a file with multiple protocols they can all be easily merged via `append!`.
 
@@ -448,7 +448,7 @@ julia> addlistener(listener, error_event)
 """
 abstract type WaylandInterface end
 """
-	struct WaylandRequestMeta{object, rname}(opcode, args)
+	WaylandRequestMeta{object, rname}(opcode, args)
 
 Request meta object. Describes a request and allows dispatching on concrete requests. Create an instance only if you want to describe a request - for dispatching use the automatically generated instance or the parametrised type itself.
 
@@ -471,7 +471,6 @@ Then, from that, the Scanner will generate the request function:
 ```
 new_id arguments aren't presented to the user, but are acquired by the get_newid call inside the function, so the result in this case is a request function with just one argument, the target.
 """
-
 struct WaylandRequestMeta
 	target::WaylandInterface
 	name::Symbol
@@ -551,7 +550,7 @@ end
 
 # Library generation
 """
-	macro genrequest(meta)
+	genrequest(meta)
 
 Generate a request function from meta.
 
@@ -561,7 +560,7 @@ meta must contain fields:
 .opcode: a `UInt16` - the request opcode
 .args: an ordered iterable collection of `name=>Type` `Pair{Symbol,TypeofWlMsgType}`s describing the arguments. (`name::Type`)
 """
-macro genrequest(meta)
+function genrequest(meta)
 	arg_expressions = Vector{Expr}()
 	arg_names = Vector{Symbol}()
 	for (name, type) in meta.args
@@ -569,6 +568,14 @@ macro genrequest(meta)
 		push!(arg_names, name)
 	end
 	Expr(:function, Expr(:call, meta.name, Expr(:(::), :target, Symbol(meta.target)), arg_expressions...), Expr(:call, :send_request, :target, meta.opcode, arg_names...))
+end
+"""
+	genrequest(meta)
+
+Macro version of [`genrequest`](@ref)
+"""
+macro genrequest(meta)
+	genrequest(meta)
 end
 """
     genlibclient(protocols::Set{SProtocol})
@@ -595,7 +602,7 @@ function genlibclient(protocols::Set{SProtocol})
 				end
 				request_meta = WaylandRequestMeta(WaylandInterface, Symbol(request.name), index - 1, args)
 				push!(reqs, request_meta.name => request_meta)
-				global @genrequest request_meta
+				@eval global $(genrequest(request_meta))
 			end
 			evs = EventDict()
 			for (index, event) in enumerate(interface.events)
