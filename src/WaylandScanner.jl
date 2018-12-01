@@ -55,22 +55,22 @@ struct SEvent <: ScannerStruct
 	name::AbstractString # attribute, required
 	since::WlVersion # attribute, implied
 	description::Union{SDescription,Nothing} # childnode, optional
-	args::Union{Array{SArgument,1}, Nothing} # childnodes, optional
+	args::Union{Vector{SArgument}, Nothing} # childnodes, optional
 end
 struct SRequest <: ScannerStruct
 	name::AbstractString # attribute, required
 	since::WlVersion # attribute, implied
 	rtype::RequestType # attribute, implied
 	description::Union{SDescription,Nothing} # childnode, optional
-	args::Union{Array{SArgument,1}, Nothing} # childnodes, optional
+	args::Union{Vector{SArgument}, Nothing} # childnodes, optional
 end
 struct SInterface <: ScannerStruct
 	name::AbstractString # attribute, required
 	version::WlVersion # attribute, required
 	description::Union{SDescription,Nothing} # childnode, optional
-	enums::Set{SEnum} # childnodes, optional
 	requests::Array{SRequest} # childnodes, optional
 	events::Array{SEvent} # childnodes, optional
+	enums::Set{SEnum} # childnodes, optional
 end
 struct SProtocol <: ScannerStruct
 	name::AbstractString # attribute, required
@@ -422,13 +422,13 @@ function wlparse()
 	wlparse("/usr/share/wayland/wayland.xml")
 end
 
-# Constructing
+# Generated library core
 """
 There are two actual message types, request and event. Request is a message we send, event is one we receive and need to listen to. The entire rest is up to us.
 
 When it comes to structure, I've chosen a simple approach. Don't care about protocols, as interfaces need to be unique anyway. Requests and `addlistener(listener, event)` methods are global and differentiated by multiple dispatch. Each interface acts as a collection of its requests, events and enums.
-Interfaces are struct subtypes of WaylandObject. As types, they are used for multiple dispatch.
-Because requests, events and enums may share names (for example `wl_display` has an `error` event and an `error` enum), their specific collections are separated into `requests`, `events` and `enums` properties of the `WaylandObject`, which is an instance of an interface. However, for convenience the `WaylandObject` itself acts as a collection of (request, event, enum) tuples.
+Interfaces are subtypes of WaylandInterface.
+Because requests, events and enums may share names (for example `wl_display` has an `error` event and an `error` enum), their specific collections are separated into `requests`, `events` and `enums` properties of the `WaylandInterface`, which is an instance of an interface. However, for convenience the `WaylandInterface` itself acts as a collection of (request, event, enum) tuples.
 
 Examples:
 ```julia-repl
@@ -446,7 +446,7 @@ julia> bind(wl_registry, 1)
 julia> addlistener(listener, error_event)
 ```
 """
-abstract type WaylandObject end
+abstract type WaylandInterface end
 """
 	struct WaylandRequestMeta{object, rname}(opcode, args)
 
@@ -471,23 +471,23 @@ Then, from that, the Scanner will generate the request function:
 ```
 new_id arguments aren't presented to the user, but are acquired by the get_newid call inside the function, so the result in this case is a request function with just one argument, the target.
 """
-struct WaylandRequestMeta{object, rname}
-	target::WaylandObject
+
+struct WaylandRequestMeta
+	target::WaylandInterface
 	name::Symbol
 	opcode::UInt16
-	args::Vector{Pair{Symbol, TypeofAbstractWlMsgType}}
-	WaylandRequestMeta{object, rname}(opcode, args) where rname where object = new(object, rname, opcode, args)
+	args::Union{Vector{Pair{Symbol, TypeofAbstractWlMsgType}}, Nothing}
 end
 """
-	struct WaylandEventMeta{object, ename}(opcode, args)
+	struct WaylandEventMeta
 
-Event meta object. Describes an event and allows dispatching on concrete events. Create an instance only if you want to describe an event - for dispatching use the automatically generated instance or the parametrised type itself.
+Describes an event. Create an instance only if you want to describe an event - for dispatching use the automatically generated instance or the parametrised type itself.
 """
 struct WaylandEventMeta
-	source::WaylandObject
+	source::WaylandInterface
 	name::Symbol
 	opcode::UInt16
-	args::Vector{Pair{Symbol, TypeofAbstractWlMsgType}}
+	args::Union{Vector{Pair{Symbol, TypeofAbstractWlMsgType}}, Nothing}
 end
 """
 	struct WaylandEvent{object, ename}(opcode, args)
@@ -495,14 +495,30 @@ end
 Decoded event message.
 """
 struct WaylandEvent{object, ename}
-	source::WaylandObject
+	source::WlID
 	name::Symbol
 	opcode::UInt16
-	args::Vector{Pair{Symbol, TypeofAbstractWlMsgType}}
+	args::Vector{WlMsgType}
 	WaylandEvent{object, ename}(opcode, args) where ename where object = new(object, ename, opcode, args)
 end
 
-# Library core functions
+struct WaylandEnum
+	owner::WaylandInterface
+	name::Symbol
+	entries::AbstractDict{Symbol, Integer}
+end
+
+const RequestDict = Dict{Symbol, WaylandRequestMeta}
+const EventDict = Dict{Symbol, WaylandEventMeta}
+const EnumDict = Dict{Symbol, WaylandEnum}
+
+struct WaylandInterfaceMeta
+	requests::RequestDict
+	events::EventDict
+	enums::EnumDict
+end
+const WaylandProtocol = Dict{Symbol, WaylandInterfaceMeta}
+
 """
 	send_request(sender::WlID, request::WaylandRequestMeta, args...)
 
@@ -510,7 +526,7 @@ Create the request message and send it.
 
 This is part of the low level interface used by the generated library. You probably want the generated functions instead.
 """
-function send_request(io::IO, sender::WlID, request::WaylandRequestMeta, args::WlMsgType...)
+function send_request(io::IO, from::WlID, opcode, args::WlMsgType...)
 	size = 8 # just the header
 	if isempty(args)
 		payload = nothing
@@ -520,7 +536,7 @@ function send_request(io::IO, sender::WlID, request::WaylandRequestMeta, args::W
 			size += write(payload, arg)
 		end
 	end
-	send(io, GenericMessage(sender, size, request.opcode, payload))
+	send(io, GenericMessage(from, size, opcode, payload))
 end
 """
     receive_event(io::IO; msg_type=GenericMessage)
@@ -533,10 +549,89 @@ function receive_event(io::IO, msg_type=GenericMessage)
 	receive(io, msg_type)
 end
 
-struct WaylandEnum
-	owner::WaylandObject
-	name::Symbol
-	entries::Dict{Symbol, Integer}
+# Library generation
+"""
+	macro genrequest(meta)
+
+Generate a request function from meta.
+
+meta must contain fields:
+.target: a `WaylandInterface` subtype - type of the object the request will be sent to
+.name: a `Symbol` which will become the function name
+.opcode: a `UInt16` - the request opcode
+.args: an ordered iterable collection of `name=>Type` `Pair{Symbol,TypeofWlMsgType}`s describing the arguments. (`name::Type`)
+"""
+macro genrequest(meta)
+	arg_expressions = Vector{Expr}()
+	arg_names = Vector{Symbol}()
+	for (name, type) in meta.args
+		push!(arg_expressions, Expr(:(::), name, type))
+		push!(arg_names, name)
+	end
+	Expr(:function, Expr(:call, meta.name, Expr(:(::), :target, Symbol(meta.target)), arg_expressions...), Expr(:call, :send_request, :target, meta.opcode, arg_names...))
 end
+"""
+    genlibclient(protocols::Set{SProtocol})
+
+Generate the client library. Entry point of the generation step.
+
+The generated library consists of a internally used interface dictionary of type WaylandProtocol and meant for direct use methods. The interface dictionary is a Dict which maps a Symbol interface name to a simple WaylandInterfaceMeta object, consisting only of three dictionaries: `requests::Dict{Symbol, WaylandRequestMeta}`, `events::Dict{Symbol, WaylandEventMeta}` and `enums::Dict{Symbol, WaylandEnum}`.
+
+By default there is only one WaylandProtocol holding all known interfaces. However, if the separation of loaded protocols is desired, it is entirely possible to call this function multiple times, resulting in multiple working dictionaries and multiple but indistinguishable sets of generated methods.
+"""
+function genlibclient(protocols::Set{SProtocol})
+	ifs = Dict{Symbol, WaylandInterfaceMeta}()
+	for prot in protocols
+		for interface in prot.interfaces # TODO: generate an interface type instead of just passing the abstract supertype everywhere.
+			reqs = RequestDict()
+			for (index, request) in enumerate(interface.requests)
+				if request.args == nothing
+					args = nothing
+				else
+					args = Vector{Pair{Symbol, TypeofAbstractWlMsgType}}()
+					for arg in request.args
+						push!(args, Symbol(arg.name) => arg.type)
+					end
+				end
+				request_meta = WaylandRequestMeta(WaylandInterface, Symbol(request.name), index - 1, args)
+				push!(reqs, request_meta.name => request_meta)
+				global @genrequest request_meta
+			end
+			evs = EventDict()
+			for (index, event) in enumerate(interface.events)
+				if event.args == nothing
+					args = nothing
+				else
+					args = Vector{Pair{Symbol, TypeofAbstractWlMsgType}}()
+					for arg in event.args
+						push!(args, Symbol(arg.name) => arg.type)
+					end
+				end
+				push!(evs, Symbol(event.name) => WaylandEventMeta(WaylandInterface, Symbol(event.name), index - 1, args))
+			end
+			ens = EnumDict()
+			for enum in interface.enums
+				push!(ens, Symbol(enum.name) => WaylandEnum(WaylandInterface, Symbol(enum.name), Dict(enum.entries)))
+			end
+			push!(ifs, Symbol(interface.name) => WaylandInterfaceMeta(reqs, evs, ens))
+		end
+	end
+end
+"""
+	genlibclient(path::String)
+
+Generate the client library from a protocol XML file denoted by `path`.
+
+Equivalent to calling `genlibclient(wlparse(path))`.
+"""
+genlibclient(path::String) = genlibclient(wlparse(path))
+"""
+	genlibclient(paths::Set{String})
+
+Generate the client library from a Set of protocol XML files.
+
+Equivalent to calling `genlibclient(reduce(append!, wlparse.(paths)))`.
+"""
+genlibclient(paths::Set{String}) = genlibclient(reduce(append!, wlparse.(paths))
 
 end  # module WaylandScanner
