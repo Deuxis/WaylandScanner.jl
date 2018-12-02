@@ -577,6 +577,26 @@ function genrequest(meta)
 	end
 end
 """
+	addlistener(f, event::Type{<: WaylandEvent}, data = nothing)
+
+Register `f` to be called every time an event of `event` type gets fired.
+
+The default implementations only pass one argument to `f` – the event object itself – if `data` is set to nothing, and two arguments – the event object as first and `data` as second – otherwise.
+"""
+addlistener(f, event::Type{WaylandEvent}) = error("Generic `addlistener` called for $(event)!")
+"""
+	remlistener(f, event::Type{WaylandEvent})
+
+Remove `f` from registered listeners on event type `event`, returning `f`. Throws ArgumentError if `f` is not registered as listener on `event`.
+"""
+remlistener(f, event::Type{WaylandEvent}) = error("Generic `remlistener` called for $(event)!")
+"""
+	remlistener(f, event::Type{WaylandEvent}, onfail)
+
+Remove `f` from registered listeners on event type `event`, returning `f`. If `f` is not registered as listener on `event`, returns `onfail` instead.
+"""
+remlistener(f, event::Type{WaylandEvent}, default) = error("Generic `remlistener` called for $(event)!")
+"""
     genlibclient(protocols::Set{SProtocol})
 
 Generate the client library. Entry point of the generation step.
