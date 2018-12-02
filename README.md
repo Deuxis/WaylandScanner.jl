@@ -34,7 +34,7 @@ julia> protocols = reduce(append!, wlparse.(filenames))
 ```
 
 ## Dependencies
-The only direct dependencies are a working 1.0-compatible Julia runtime and the imported modules, LightXML and FixedPointNumbers, but LightXML depends on libxml2.
+The only direct dependencies are a working 1.0-compatible Julia runtime and the imported modules, LightXML and WaylandCore, but LightXML depends on libxml2.
 
 ## Additional notes
 LightXML seems to have some bugs when interacting with my version of libxml2 (2.9.8 from Gentoo repo), resulting in occasional internal errors. If that happens to you, just re-run the wlparse function.
