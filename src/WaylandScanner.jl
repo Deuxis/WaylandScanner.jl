@@ -1,6 +1,6 @@
 module WaylandScanner
 
-export wlparse
+export wlparse, genlibclient
 
 import Base.show, Base.read, Base.write
 using Base: finalizer
@@ -68,8 +68,8 @@ struct SInterface <: ScannerStruct
 	name::AbstractString # attribute, required
 	version::WlVersion # attribute, required
 	description::Union{SDescription,Nothing} # childnode, optional
-	requests::Array{SRequest} # childnodes, optional
-	events::Array{SEvent} # childnodes, optional
+	requests::Vector{SRequest} # childnodes, optional
+	events::Vector{SEvent} # childnodes, optional
 	enums::Set{SEnum} # childnodes, optional
 end
 struct SProtocol <: ScannerStruct
@@ -136,8 +136,8 @@ function SInterface(element::XMLElement)
 	_description = find_element(element, "description")
 	description  = _description == nothing ? nothing : SDescription(_description)
 	enums = Set{SEnum}()
-	requests = Array{SRequest}()
-	events = Array{SEvent}()
+	requests = Vector{SRequest}()
+	events = Vector{SEvent}()
 	for child in child_elements(element)
 		childname = LightXML.name(child)
 		if childname == "enum"
@@ -148,7 +148,7 @@ function SInterface(element::XMLElement)
 			push!(events, SEvent(child))
 		end
 	end
-	SInterface(name, version, description, enums, requests, events)
+	SInterface(name, version, description, requests, events, enums)
 end
 function SRequest(element::XMLElement)
 	name = attribute(element, "name"; required=true)
@@ -161,7 +161,7 @@ function SRequest(element::XMLElement)
 	end
 	_description = find_element(element, "description")
 	description = _description == nothing ? nothing : SDescription(_description)
-	args = Array{SArgument,1}()
+	args = Vector{SArgument}()
 	for child in child_elements(element)
 		if LightXML.name(child) == "arg"
 			push!(args, SArgument(child))
@@ -175,7 +175,7 @@ function SEvent(element::XMLElement)
 	since = imply_since(attribute(element, "since"))
 	_description = find_element(element, "description")
 	description = _description == nothing ? nothing : SDescription(_description)
-	args = Array{SArgument,1}()
+	args = Vector{SArgument}()
 	for child in child_elements(element)
 		if LightXML.name(child) == "arg"
 			push!(args, SArgument(child))
@@ -277,7 +277,7 @@ stype(::SDescription) = "Description"
 
 Any collection of `ScannerStruct`s.
 """
-const SCollection = Union{Set{<: ScannerStruct},Array{<: ScannerStruct},Dict{<: Any,<: ScannerStruct}}
+const SCollection = Union{Set{<: ScannerStruct},Vector{<: ScannerStruct},Dict{<: Any,<: ScannerStruct}}
 """
     getindent(count::Integer, s::AbstractString = "\t")
 
@@ -446,6 +446,13 @@ julia> bind(wl_registry, 1)
 julia> addlistener(listener, error_event)
 ```
 """
+"""
+	WaylandInterface
+
+The supertype of all Wayland interfaces. Subtypes must either have `id` property which holds their object id or custom [`send_request`](@ref) and [`receive_event`](@ref).
+
+Direct analogy to Wayland. The subtypes represent different interfaces and their instances represent instances of objects implementing these interfaces.
+"""
 abstract type WaylandInterface end
 """
 	WaylandRequestMeta{object, rname}(opcode, args)
@@ -467,12 +474,11 @@ Such struct semantically describes the `wl_display::get_registry` request of the
 Then, from that, the Scanner will generate the request function:
 ```julia
 # get_registry(display::WlDisplay)
-@exec $rname(display::$(typeof(wl_display))) = send_request(display, wl_display.requests[rname], get_newid())
 ```
 new_id arguments aren't presented to the user, but are acquired by the get_newid call inside the function, so the result in this case is a request function with just one argument, the target.
 """
 struct WaylandRequestMeta
-	target::WaylandInterface
+	target::Type{<: WaylandInterface}
 	name::Symbol
 	opcode::UInt16
 	args::Union{Vector{Pair{Symbol, TypeofAbstractWlMsgType}}, Nothing}
@@ -483,7 +489,7 @@ end
 Describes an event. Create an instance only if you want to describe an event - for dispatching use the automatically generated instance or the parametrised type itself.
 """
 struct WaylandEventMeta
-	source::WaylandInterface
+	source::Type{<: WaylandInterface}
 	name::Symbol
 	opcode::UInt16
 	args::Union{Vector{Pair{Symbol, TypeofAbstractWlMsgType}}, Nothing}
@@ -502,9 +508,9 @@ struct WaylandEvent{object, ename}
 end
 
 struct WaylandEnum
-	owner::WaylandInterface
+	owner # WaylandInterfaceMeta, but circular dependency
 	name::Symbol
-	entries::AbstractDict{Symbol, Integer}
+	entries::AbstractDict{Symbol, WlUInt}
 end
 
 const RequestDict = Dict{Symbol, WaylandRequestMeta}
@@ -516,12 +522,31 @@ struct WaylandInterfaceMeta
 	events::EventDict
 	enums::EnumDict
 end
-const WaylandProtocol = Dict{Symbol, WaylandInterfaceMeta}
+const InterfaceDict = Dict{Symbol, WaylandInterfaceMeta}
 
 """
-	send_request(sender::WlID, request::WaylandRequestMeta, args...)
+	current_newid
 
-Create the request message and send it.
+A simple counter state for [`get_newid`](@ref)
+"""
+let current_newid = 0 # Because we return the value of `+= 1`, the first ID returned is 1.
+	"""
+		get_newid()
+
+	Gets the next free ID in client range, which is [1, 0xff000000)
+	"""
+	global get_newid() = current_newid < 0xff000000 ? current_newid += 1 : current_newid = 1
+end
+#="""
+	used_ids
+
+A Set of IDs that are in use, updated every time an object gets created by us, and when it gets destroyed. NYI
+"""
+used_ids = Set{WlID}=#
+"""
+	send_request(io::IO, from::WlID, opcode, args::WlMsgType...)
+
+Create the request message and send it to the IO.
 
 This is part of the low level interface used by the generated library. You probably want the generated functions instead.
 """
@@ -537,6 +562,10 @@ function send_request(io::IO, from::WlID, opcode, args::WlMsgType...)
 	end
 	send(io, GenericMessage(from, size, opcode, payload))
 end
+"""
+	send_request(to::WaylandInterface, from::WlID, opcode, args::WlMsgType...)
+"""
+send_request(to::WaylandInterface, from::WlID, opcode, args::WlMsgType...) = send_request(to.id, from, opcode, args...)
 """
     receive_event(io::IO; msg_type=GenericMessage)
 
@@ -558,16 +587,24 @@ meta must contain fields:
 .target: a `WaylandInterface` subtype - type of the object the request will be sent to
 .name: a `Symbol` which will become the function name
 .opcode: a `UInt16` - the request opcode
-.args: an ordered iterable collection of `name=>Type` `Pair{Symbol,TypeofWlMsgType}`s describing the arguments. (`name::Type`)
+.args: an ordered iterable collection of `name=>Type` `Pair{Symbol,TypeofWlMsgType}`s describing the (`name::Type`) arguments.
 """
 function genrequest(meta)
-	arg_expressions = Vector{Expr}()
-	arg_names = Vector{Symbol}()
-	for (name, type) in meta.args
-		push!(arg_expressions, Expr(:(::), name, type))
-		push!(arg_names, name)
+	if meta.args == nothing
+		:( $(meta.name)(target::$(meta.target)) = send_request(target, $(meta.opcode)) )
+	else
+		head_args = Vector{Expr}()
+		tail_args = Vector{Expr}()
+		for (name, type) in meta.args
+			if type == WlNewID # new_id means we only have to supply an automatically generated ID to the send_request call
+				push!(tail_args, :(get_newid()))
+			else
+				push!(head_args, :($name::$type))
+				push!(tail_args, name)
+			end
+		end
+		:( $(meta.name)(target::$(meta.target), $(head_args...)) = send_request(target, $(meta.opcode), $(tail_args...)) )
 	end
-	Expr(:function, Expr(:call, meta.name, Expr(:(::), :target, Symbol(meta.target)), arg_expressions...), Expr(:call, :send_request, :target, meta.opcode, arg_names...))
 end
 """
 	genrequest(meta)
@@ -582,14 +619,31 @@ end
 
 Generate the client library. Entry point of the generation step.
 
-The generated library consists of a internally used interface dictionary of type WaylandProtocol and meant for direct use methods. The interface dictionary is a Dict which maps a Symbol interface name to a simple WaylandInterfaceMeta object, consisting only of three dictionaries: `requests::Dict{Symbol, WaylandRequestMeta}`, `events::Dict{Symbol, WaylandEventMeta}` and `enums::Dict{Symbol, WaylandEnum}`.
+The generated library consists of a internally used interface dictionary of type InterfaceDict holding metadata and structs and methods meant for direct use.
 
-By default there is only one WaylandProtocol holding all known interfaces. However, if the separation of loaded protocols is desired, it is entirely possible to call this function multiple times, resulting in multiple working dictionaries and multiple but indistinguishable sets of generated methods.
+The interface dictionary is a Dict which maps a Symbol interface name to a simple WaylandInterfaceMeta object, consisting only of three dictionaries: `requests::RequestDict`, `events::EventDict` and `enums::EnumDict`. It's the easiest way to check enum values and events to register listeners to.
+
+The generated structs are subtypes of [`WaylandInterface`](@ref) and are described there, while methods are requests – which have the names of the requests they represent – and `addlistener` + `remlistener` duo for listening to events. For example, parsing `wl_display` interface will generate a `WlDisplay` struct for representing such object, a [`get_registry(target::WlDisplay)`](@ref) method for sending its `get_registry` request and [`addlistener(f, event::Type{WaylandEvent{ID, :error}}) where ID`](@ref), [`remlistener(f, event::Type{WaylandEvent{ID, :error}}) where ID`](@ref) duo for interacting with its "error" events.
+
+By default there is only one InterfaceDict holding all known interfaces, returned from one call to genlibclient. However, if the separation of loaded protocols is desired, it is entirely possible to call this function multiple times, resulting in multiple working dictionaries and multiple but indistinguishable sets of generated methods.
 """
 function genlibclient(protocols::Set{SProtocol})
 	ifs = Dict{Symbol, WaylandInterfaceMeta}()
 	for prot in protocols
-		for interface in prot.interfaces # TODO: generate an interface type instead of just passing the abstract supertype everywhere.
+		for interface in prot.interfaces
+			# Generate the interface type.
+			iftypename = Unicode.titlecase(replace(interface.name, r"_" => '')) # wl_display to WlDisplay
+			@eval begin
+				"""
+					$iftypename
+
+				Represents a $(interface.name) object.
+				"""
+				struct $iftypename <: WaylandInterface # Visible in global scope since that's where [`eval`](@ref) executes.
+					id::WlID
+				end
+				iftype = $iftypename
+			end
 			reqs = RequestDict()
 			for (index, request) in enumerate(interface.requests)
 				if request.args == nothing
@@ -600,9 +654,21 @@ function genlibclient(protocols::Set{SProtocol})
 						push!(args, Symbol(arg.name) => arg.type)
 					end
 				end
-				request_meta = WaylandRequestMeta(WaylandInterface, Symbol(request.name), index - 1, args)
+				request_meta = WaylandRequestMeta(iftype, Symbol(request.name), index - 1, args)
 				push!(reqs, request_meta.name => request_meta)
-				@eval global $(genrequest(request_meta))
+				# [`eval`](@ref) executes in module's global scope, so the request methods along with their docs will too be visible.
+				docargstring = "target::$(request_meta.target)"
+				if args != nothing
+					for (name, type) in args
+						docargstring *= ", $name::$type"
+					end
+				end
+				"""
+					$(request_meta.name)($docargstring)
+
+				$(repr(request.description))
+				"""
+				eval(genrequest(request_meta))
 			end
 			evs = EventDict()
 			for (index, event) in enumerate(interface.events)
@@ -614,15 +680,21 @@ function genlibclient(protocols::Set{SProtocol})
 						push!(args, Symbol(arg.name) => arg.type)
 					end
 				end
-				push!(evs, Symbol(event.name) => WaylandEventMeta(WaylandInterface, Symbol(event.name), index - 1, args))
+				push!(evs, Symbol(event.name) => WaylandEventMeta(iftype, Symbol(event.name), index - 1, args))
 			end
 			ens = EnumDict()
+			ifmeta = WaylandInterfaceMeta(reqs, evs, ens) # needed here and not in the push!() below because it's needed for WaylandEnum construction
 			for enum in interface.enums
-				push!(ens, Symbol(enum.name) => WaylandEnum(WaylandInterface, Symbol(enum.name), Dict(enum.entries)))
+				entries = Dict{Symbol, WlUInt}()
+				for (name, entry) in enum.entries
+					push!(entries, name => entry.value)
+				end
+				push!(ens, Symbol(enum.name) => WaylandEnum(ifmeta, Symbol(enum.name), entries))
 			end
-			push!(ifs, Symbol(interface.name) => WaylandInterfaceMeta(reqs, evs, ens))
+			push!(ifs, Symbol(interface.name) => ifmeta)
 		end
 	end
+	return ifs
 end
 """
 	genlibclient(path::String)
@@ -639,6 +711,6 @@ Generate the client library from a Set of protocol XML files.
 
 Equivalent to calling `genlibclient(reduce(append!, wlparse.(paths)))`.
 """
-genlibclient(paths::Set{String}) = genlibclient(reduce(append!, wlparse.(paths))
+genlibclient(paths::Set{String}) = genlibclient(reduce(append!, wlparse.(paths)))
 
 end  # module WaylandScanner
