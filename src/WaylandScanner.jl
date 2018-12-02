@@ -619,7 +619,7 @@ end
 
 Generate the client library. Entry point of the generation step.
 
-The generated library consists of a internally used interface dictionary of type InterfaceDict holding metadata and structs and methods meant for direct use.
+The generated library consists of a internally used interface dictionary of type InterfaceDict holding metadata, and structs and methods meant for direct use.
 
 The interface dictionary is a Dict which maps a Symbol interface name to a simple WaylandInterfaceMeta object, consisting only of three dictionaries: `requests::RequestDict`, `events::EventDict` and `enums::EnumDict`. It's the easiest way to check enum values and events to register listeners to.
 
