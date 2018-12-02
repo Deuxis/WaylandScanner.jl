@@ -416,7 +416,7 @@ end
 """
     wlparse()
 
-Parse the default Wayland protocol located at /usr/share/wayland/wayland.xml
+Parse the default Wayland protocol located at `/usr/share/wayland/wayland.xml`.
 """
 function wlparse()
 	wlparse("/usr/share/wayland/wayland.xml")
@@ -424,58 +424,24 @@ end
 
 # Generated library core
 """
-There are two actual message types, request and event. Request is a message we send, event is one we receive and need to listen to. The entire rest is up to us.
-
-When it comes to structure, I've chosen a simple approach. Don't care about protocols, as interfaces need to be unique anyway. Requests and `addlistener(listener, event)` methods are global and differentiated by multiple dispatch. Each interface acts as a collection of its requests, events and enums.
-Interfaces are subtypes of WaylandInterface.
-Because requests, events and enums may share names (for example `wl_display` has an `error` event and an `error` enum), their specific collections are separated into `requests`, `events` and `enums` properties of the `WaylandInterface`, which is an instance of an interface. However, for convenience the `WaylandInterface` itself acts as a collection of (request, event, enum) tuples.
-
-Examples:
-```julia-repl
-# Accessing a tuple (any non-existing value gets replaced by default_value _in the tuple_):
-julia> get(wl_display, :error, nothing)
-(nothing, WaylandEventMeta{wl_display, :error}, WaylandEnum(wl_display, :error, :invalid_object=>0, :invalid_method=>1, :no_memory=>2))
-# Accessing an event:
-julia> error_event = get(wl_display.events, :error, nothing)
-WaylandEventMeta{wl_display, :error}
-# Launching a request:
-julia> get_registry(wl_display)
-# Launching a request with arguments:
-julia> bind(wl_registry, 1)
-# Adding an event listener:
-julia> addlistener(listener, error_event)
-```
-"""
-"""
 	WaylandInterface
 
 The supertype of all Wayland interfaces. Subtypes must either have `id` property which holds their object id or custom [`send_request`](@ref) and [`receive_event`](@ref).
 
-Direct analogy to Wayland. The subtypes represent different interfaces and their instances represent instances of objects implementing these interfaces.
+Direct analogy to Wayland's object model. The subtypes represent different interfaces and their instances represent instances of objects implementing these interfaces.
 """
 abstract type WaylandInterface end
 """
-	WaylandRequestMeta{object, rname}(opcode, args)
+	WaylandRequestMeta(target, name, opcode, args)
 
-Request meta object. Describes a request and allows dispatching on concrete requests. Create an instance only if you want to describe a request - for dispatching use the automatically generated instance or the parametrised type itself.
+Request meta object. Create an instance only if you want to describe a request.
 
-`target` (and the `object` parameter): the interface the request will be targeted for
+`target`: the interface the request will be targeted for
 `name`: the name of the request
 `opcode`: opcode of the request. Depends on the order the request is listed in, counting from 0. For example, wl_display::sync is listed first (and therefore is in the wl_display's requests array at index 1), so its opcode is 0 (index - 1).
 `args`: A Vector of name=>type pairs, describing the arguments in order.
 
-As an example, for the `get_registry` request of `wl_display` the Scanner will create this:
-```julia
-# opcode is determined from request index during iteration
-rname = :get_registry
-wl_display.requests[rname] = WaylandRequestMeta{wl_display.interface, rname}(opcode, [:registry=>WlNewID])
-```
-Such struct semantically describes the `wl_display::get_registry` request of the Wayland Protocol and corresponds to the generated C API function `wl_display_get_registry(wl_display * display, new_id_t registry)`
-Then, from that, the Scanner will generate the request function:
-```julia
-# get_registry(display::WlDisplay)
-```
-new_id arguments aren't presented to the user, but are acquired by the get_newid call inside the function, so the result in this case is a request function with just one argument, the target.
+Objects of this type are created by the parser from [`SRequest`](@ref)s obtained from the xml file. Opcode is the index of the request in the [`SInterface`](@ref), starting from 0.
 """
 struct WaylandRequestMeta
 	target::Type{<: WaylandInterface}
@@ -484,9 +450,9 @@ struct WaylandRequestMeta
 	args::Union{Vector{Pair{Symbol, TypeofAbstractWlMsgType}}, Nothing}
 end
 """
-	struct WaylandEventMeta
+	WaylandEventMeta
 
-Describes an event. Create an instance only if you want to describe an event - for dispatching use the automatically generated instance or the parametrised type itself.
+Describes an event. Create an instance only if you want to describe an event - for operating on events use [`WaylandEvent`](@ref)
 """
 struct WaylandEventMeta
 	source::Type{<: WaylandInterface}
@@ -495,12 +461,12 @@ struct WaylandEventMeta
 	args::Union{Vector{Pair{Symbol, TypeofAbstractWlMsgType}}, Nothing}
 end
 """
-	struct WaylandEvent{object, ename}(opcode, args)
+	WaylandEvent{object, ename}(opcode, args)
 
-Decoded event message.
+Decoded event message. Parametrised so you can match an event "name" from wayland object "obj" with WaylandEvent{obj, :name}
 """
 struct WaylandEvent{object, ename}
-	source::WlID
+	source::WaylandInterface
 	name::Symbol
 	opcode::UInt16
 	args::Vector{WlMsgType}
@@ -535,7 +501,7 @@ let current_newid = 0 # Because we return the value of `+= 1`, the first ID retu
 
 	Gets the next free ID in client range, which is [1, 0xff000000)
 	"""
-	global get_newid() = current_newid < 0xff000000 ? current_newid += 1 : current_newid = 1
+	global get_newid() = current_newid < 0xff000000 ? current_newid += 1 : current_newid = 1 # TODO: Check if it's not still used, even after a full loop. (Not necessary for testing, as a testing client will never go through 16 777 215 IDs)
 end
 #="""
 	used_ids
@@ -564,6 +530,8 @@ function send_request(io::IO, from::WlID, opcode, args::WlMsgType...)
 end
 """
 	send_request(to::WaylandInterface, from::WlID, opcode, args::WlMsgType...)
+
+[`send_request`](@ref) to the given object's ID.
 """
 send_request(to::WaylandInterface, from::WlID, opcode, args::WlMsgType...) = send_request(to.id, from, opcode, args...)
 """
@@ -588,6 +556,8 @@ meta must contain fields:
 .name: a `Symbol` which will become the function name
 .opcode: a `UInt16` - the request opcode
 .args: an ordered iterable collection of `name=>Type` `Pair{Symbol,TypeofWlMsgType}`s describing the (`name::Type`) arguments.
+
+new_id arguments aren't presented to the user, but are acquired by the get_newid call in send_request arguments.
 """
 function genrequest(meta)
 	if meta.args == nothing
@@ -596,7 +566,7 @@ function genrequest(meta)
 		head_args = Vector{Expr}()
 		tail_args = Vector{Expr}()
 		for (name, type) in meta.args
-			if type == WlNewID # new_id means we only have to supply an automatically generated ID to the send_request call
+			if type == WlNewID
 				push!(tail_args, :(get_newid()))
 			else
 				push!(head_args, :($name::$type))
@@ -605,14 +575,6 @@ function genrequest(meta)
 		end
 		:( $(meta.name)(target::$(meta.target), $(head_args...)) = send_request(target, $(meta.opcode), $(tail_args...)) )
 	end
-end
-"""
-	genrequest(meta)
-
-Macro version of [`genrequest`](@ref)
-"""
-macro genrequest(meta)
-	genrequest(meta)
 end
 """
     genlibclient(protocols::Set{SProtocol})
@@ -625,7 +587,11 @@ The interface dictionary is a Dict which maps a Symbol interface name to a simpl
 
 The generated structs are subtypes of [`WaylandInterface`](@ref) and are described there, while methods are requests – which have the names of the requests they represent – and `addlistener` + `remlistener` duo for listening to events. For example, parsing `wl_display` interface will generate a `WlDisplay` struct for representing such object, a [`get_registry(target::WlDisplay)`](@ref) method for sending its `get_registry` request and [`addlistener(f, event::Type{WaylandEvent{ID, :error}}) where ID`](@ref), [`remlistener(f, event::Type{WaylandEvent{ID, :error}}) where ID`](@ref) duo for interacting with its "error" events.
 
-By default there is only one InterfaceDict holding all known interfaces, returned from one call to genlibclient. However, if the separation of loaded protocols is desired, it is entirely possible to call this function multiple times, resulting in multiple working dictionaries and multiple but indistinguishable sets of generated methods.
+By default there is only one InterfaceDict holding all known interfaces, returned from one call to genlibclient. However, if the separation of loaded protocols is desired, it is entirely possible to call this function multiple times, resulting in multiple working dictionaries and multiple but indistinguishable sets of generated methods. (Do note that in the event of repeating interface name there will be a namespace clash of generated globally-visible structs and, if they have the same named requests/events, the methods)
+
+To be implemented:
+
+- Treating destructor requests differently so that they get processed automatically without the need for the user to manually call them.
 """
 function genlibclient(protocols::Set{SProtocol})
 	ifs = Dict{Symbol, WaylandInterfaceMeta}()
@@ -697,20 +663,20 @@ function genlibclient(protocols::Set{SProtocol})
 	return ifs
 end
 """
-	genlibclient(path::String)
+	genlibclient(path::AbstractString)
 
 Generate the client library from a protocol XML file denoted by `path`.
 
 Equivalent to calling `genlibclient(wlparse(path))`.
 """
-genlibclient(path::String) = genlibclient(wlparse(path))
+genlibclient(path::AbstractString) = genlibclient(wlparse(path))
 """
-	genlibclient(paths::Set{String})
+	genlibclient(paths::Set{AbstractString})
 
 Generate the client library from a Set of protocol XML files.
 
 Equivalent to calling `genlibclient(reduce(append!, wlparse.(paths)))`.
 """
-genlibclient(paths::Set{String}) = genlibclient(reduce(append!, wlparse.(paths)))
+genlibclient(paths::Set{AbstractString}) = genlibclient(reduce(append!, wlparse.(paths)))
 
 end  # module WaylandScanner
