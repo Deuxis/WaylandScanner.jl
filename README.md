@@ -1,5 +1,5 @@
 # WaylandScanner.jl
-A Julia module for parsing Wayland protocol files and :unicorn:generating Julia bindings. In the future this module will hopefully be able to generate full Wayland bindings that can be statically compiled into something that doesn't even require a Julia runtime.
+A Julia module for parsing Wayland protocol files and generating Julia bindings. In the future this module will hopefully be able to generate full Wayland bindings that can be statically compiled into something that doesn't even require a Julia runtime.
 
 Heavily work in progress.
 
@@ -7,7 +7,7 @@ Heavily work in progress.
 | ------------------------------- | --------------- |
 | parsing XML protocol files      | done (unstable) |
 | pretty-printing the parsed tree | done (unstable) |
-| generating Julia bindings       | not yet started |
+| generating Julia bindings       | mostly done     |
 
 ## Installing
 ```julia-repl
