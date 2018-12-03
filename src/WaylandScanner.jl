@@ -2,7 +2,7 @@ module WaylandScanner
 
 export wlparse, genlibclient
 
-import Base.show, Base.read, Base.write
+import Unicode, Base.show, Base.read, Base.write
 using Base: finalizer
 using WaylandCore
 using LightXML
@@ -490,11 +490,6 @@ struct WaylandInterfaceMeta
 end
 const InterfaceDict = Dict{Symbol, WaylandInterfaceMeta}
 
-"""
-	current_newid
-
-A simple counter state for [`get_newid`](@ref)
-"""
 let current_newid = 0 # Because we return the value of `+= 1`, the first ID returned is 1.
 	"""
 		get_newid()
@@ -577,6 +572,18 @@ function genrequest(meta)
 	end
 end
 """
+	ListenerRegistry
+
+As the name says. Dictionary mapping event types to `Set`s of their listeners.
+"""
+ListenerRegistry = Dict{WaylandEvent, Set{Function}}
+"""
+	GlobalListenerRegistry
+
+Global, default instance of [`ListenerRegistry`](@ref).
+"""
+global_listener_registry = ListenerRegistry()
+"""
 	addlistener(f, event::Type{<: WaylandEvent}, data = nothing)
 
 Register `f` to be called every time an event of `event` type gets fired.
@@ -585,17 +592,11 @@ The default implementations only pass one argument to `f` – the event object i
 """
 addlistener(f, event::Type{WaylandEvent}) = error("Generic `addlistener` called for $(event)!")
 """
-	remlistener(f, event::Type{WaylandEvent})
+	remlistener(f, event::Type{WaylandEvent}, throws = true)
 
-Remove `f` from registered listeners on event type `event`, returning `f`. Throws ArgumentError if `f` is not registered as listener on `event`.
+Remove `f` from registered listeners on event type `event`, returning `f`. If `throws` is true, throws ArgumentError if `f` is not registered as listener on `event`, otherwise returns false in that case.
 """
-remlistener(f, event::Type{WaylandEvent}) = error("Generic `remlistener` called for $(event)!")
-"""
-	remlistener(f, event::Type{WaylandEvent}, onfail)
-
-Remove `f` from registered listeners on event type `event`, returning `f`. If `f` is not registered as listener on `event`, returns `onfail` instead.
-"""
-remlistener(f, event::Type{WaylandEvent}, default) = error("Generic `remlistener` called for $(event)!")
+remlistener(f, event::Type{WaylandEvent}, throws = true) = error("Generic `remlistener` called for $(event)!")
 """
     genlibclient(protocols::Set{SProtocol})
 
@@ -618,8 +619,8 @@ function genlibclient(protocols::Set{SProtocol})
 	for prot in protocols
 		for interface in prot.interfaces
 			# Generate the interface type.
-			iftypename = Unicode.titlecase(replace(interface.name, r"_" => '')) # wl_display to WlDisplay
-			@eval begin
+			iftypename = Symbol(replace(Unicode.titlecase(interface.name), r"_" => "")) # wl_display to WlDisplay
+			eval(quote
 				"""
 					$iftypename
 
@@ -629,7 +630,7 @@ function genlibclient(protocols::Set{SProtocol})
 					id::WlID
 				end
 				iftype = $iftypename
-			end
+			end)
 			reqs = RequestDict()
 			for (index, request) in enumerate(interface.requests)
 				if request.args == nothing
@@ -666,7 +667,29 @@ function genlibclient(protocols::Set{SProtocol})
 						push!(args, Symbol(arg.name) => arg.type)
 					end
 				end
-				push!(evs, Symbol(event.name) => WaylandEventMeta(iftype, Symbol(event.name), index - 1, args))
+				event_meta = WaylandEventMeta(iftype, Symbol(event.name), index - 1, args)
+				push!(evs, event_meta.name => event_meta)
+				# Add the event to global listener registry
+				event_type = WaylandEvent{iftype, event_meta.name}
+				push!(global_listener_registry, event_type => Set{Function}())
+				# not sure if eval is needed here
+				@eval begin
+					function addlistener(f::Function, ::Type{WaylandEvent{$iftype, $(event_meta.name)}})
+						push(global_listener_registry[$event_type], f)
+					end
+					function remlistener(f::Function, ::Type{WaylandEvent{$iftype, $(event_meta.name)}}, throws = true)
+						if f in global_listener_registry[$event_type]
+							delete!(global_listener_registry, f)
+							return f
+						else
+							if throws
+								throw(ArgumentError("$f wasn't registered in global_listener_registry."))
+							else
+								return false
+							end
+						end
+					end
+				end
 			end
 			ens = EnumDict()
 			ifmeta = WaylandInterfaceMeta(reqs, evs, ens) # needed here and not in the push!() below because it's needed for WaylandEnum construction
