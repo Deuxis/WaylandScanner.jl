@@ -393,6 +393,9 @@ function wlparse(element::XMLElement)
 	end
 	return protocols
 end
+
+const DEFAULT_PROTOCOL_PATH = "/usr/share/wayland/wayland.xml"
+
 """
     wlparse(path::AbstractString)
 
@@ -401,9 +404,9 @@ Parse a file denoted by `path`.
 Examples:
 ```julia
 # Parse the base protocol file
-wayland_protocol = wlparse("/usr/share/wayland/wayland.xml")
+wayland_protocol = wlparse("$DEFAULT_PROTOCOL_PATH")
 # Parse a collection of files
-protocol_files = Set("/usr/share/wayland/wayland.xml", "/usr/share/wayland-protocols/stable/xdg-shell")
+protocol_files = Set("$DEFAULT_PROTOCOL_PATH", "/usr/share/wayland-protocols/stable/xdg-shell")
 protocols = reduce(append!, wlparse.(protocol_files))
 ```
 """
@@ -416,10 +419,10 @@ end
 """
     wlparse()
 
-Parse the default Wayland protocol located at `/usr/share/wayland/wayland.xml`.
+Parse the default Wayland protocol located at `$DEFAULT_PROTOCOL_PATH`.
 """
 function wlparse()
-	wlparse("/usr/share/wayland/wayland.xml")
+	wlparse(DEFAULT_PROTOCOL_PATH)
 end
 
 end #module Parsing
