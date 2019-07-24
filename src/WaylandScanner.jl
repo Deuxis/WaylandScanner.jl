@@ -1,3 +1,7 @@
+"""
+The main WaylandScanner module provides a way to scan any Wayland protocol files and generate Julia code for using the protocols.
+This can either be done by generating expressions into the module scope at compile time or outputting a Julia script file with the definitions.
+"""
 module WaylandScanner
 
 export wlparse, genlibclient
