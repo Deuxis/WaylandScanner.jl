@@ -6,6 +6,9 @@ module Parsing
 using LightXML
 using ..WaylandCore
 
+# Explicit Base imports for adding methods
+using Base: string
+
 export wlparse, SProtocol
 
 @enum RequestType none destructor
@@ -112,6 +115,26 @@ end
 Flatten a formatted string into a simple, one-line one. Strip all trailing and leading whitespace and change all interior whitespace into a single space.
 """
 flatten(s::AbstractString) = replace(strip(s), r"\s+"=>" ")
+"""
+    string(desc::SDescription)
+
+Converts an SDescription into a plain string.
+"""
+function string(desc::SDescription)::String
+	if desc.summary != nothing
+		if desc.content != nothing
+			return "$(desc.summary)\n\n$(desc.content)"
+		else
+			return desc.summary
+		end
+	else
+		if desc.content != nothing
+			return desc.content
+		else
+			return ""
+		end
+	end
+end
 """
 	ScannerStruct(::XMLElement)
 
