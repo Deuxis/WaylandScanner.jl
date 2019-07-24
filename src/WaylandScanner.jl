@@ -12,6 +12,9 @@ using Base: finalizer
 include("Parsing.jl")
 using .Parsing
 
+# Utils
+tojuliaid(identifier) = Symbol(replace(Unicode.titlecase(string(identifier)), "_" => "")) # wl_display to WlDisplay
+
 # Generated library core
 """
 	WaylandInterface
@@ -211,7 +214,7 @@ function genlibclient(protocols::Set{SProtocol})
 			# Generate the interface type.
 			@eval begin
 				interface = $interface
-				iftypename = Symbol(replace(Unicode.titlecase(interface.name), "_" => "")) # wl_display to WlDisplay
+				iftypename = tojuliaid(interface.name)
 				"""
 					$iftypename
 
