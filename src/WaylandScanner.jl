@@ -4,8 +4,6 @@ export wlparse, genlibclient
 
 import Unicode, Base.show, Base.read, Base.write
 using Base: finalizer
-using WaylandCore
-using LightXML
 
 include("Parsing.jl")
 using .Parsing
