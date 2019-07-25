@@ -73,12 +73,12 @@ struct SInterface <: ScannerStruct
 	description::Union{SDescription,Nothing} # childnode, optional
 	requests::Vector{SRequest} # childnodes, optional
 	events::Vector{SEvent} # childnodes, optional
-	enums::Set{SEnum} # childnodes, optional
+	enums::Vector{SEnum} # childnodes, optional
 end
 struct SProtocol <: ScannerStruct
 	name::AbstractString # attribute, required
 	description::Union{SDescription,Nothing} # childnode, optional
-	interfaces::Set{SInterface} # childnodes, required (at least one)
+	interfaces::Vector{SInterface} # childnodes, required (at least one)
 end
 # scanner structs helpers
 """
@@ -144,7 +144,7 @@ function SProtocol(element::XMLElement)
 	name = attribute(element, "name"; required=true)
 	_description = find_element(element, "description")
 	description = _description == nothing ? nothing : SDescription(_description)
-	interfaces	= Set{SInterface}()
+	interfaces	= Vector{SInterface}()
 	for child in child_elements(element)
 		if LightXML.name(child) == "interface"
 			push!(interfaces, SInterface(child))
@@ -158,7 +158,7 @@ function SInterface(element::XMLElement)
 	version  = _version == nothing ? 1 : parse(WlVersion, _version)
 	_description = find_element(element, "description")
 	description  = _description == nothing ? nothing : SDescription(_description)
-	enums = Set{SEnum}()
+	enums = Vector{SEnum}()
 	requests = Vector{SRequest}()
 	events = Vector{SEvent}()
 	for child in child_elements(element)
