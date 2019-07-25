@@ -7,7 +7,7 @@ using LightXML
 using ..WaylandCore
 
 # Explicit Base imports for adding methods
-import Base.show
+import Base.string, Base.show
 
 export wlparse, SProtocol, SInterface, SRequest, SEvent, SArgument, SEnum, SEnumEntry, SDescription
 
