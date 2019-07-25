@@ -4,6 +4,8 @@ authors = ["Andrzej Korwin-Mikke <andrzej.kmikke@gmail.com>"]
 version = "0.1.1"
 
 [deps]
+Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 LightXML = "9c8b4983-aa76-5018-a973-4c85ecc9e179"
+MacroTools = "1914dd2f-81c6-5fcd-8719-6d5c9610ff09"
 Unicode = "4ec0a83e-493e-50e2-b9ac-8f72acf5a8f5"
 WaylandCore = "dbf96336-f34e-11e8-1839-07066ae9385e"
