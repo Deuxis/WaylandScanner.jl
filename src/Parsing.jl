@@ -7,9 +7,9 @@ using LightXML
 using ..WaylandCore
 
 # Explicit Base imports for adding methods
-using Base: string
+import Base.show
 
-export wlparse, SProtocol
+export wlparse, SProtocol, SInterface, SRequest, SEvent, SArgument, SEnum, SEnumEntry, SDescription
 
 @enum RequestType none destructor
 """
@@ -46,8 +46,8 @@ struct SEnum <: ScannerStruct
 	entries::Dict{Symbol,SEnumEntry} # childnodes, required
 end
 struct SArgument <: ScannerStruct
-	name::AbstractString # attribute, required. If the XML is non-compliant, this may be non-existant and still able to work, but the arguments to actual functions are named after it, so making it optional is TODO.
-	type::TypeofAbstractWlMsgType # attribute, required
+	name::AbstractString # attribute, required. If the XML is non-compliant, this may be non-existent and still able to work, but the arguments to actual functions are named after it, so making it optional is TODO.
+	type::TypeofWlMsgType # attribute, required
 	summary::Union{AbstractString,Nothing} # attribute, implied
 	interface::Union{AbstractString,Nothing} # attribute, implied. If the argument is of type "object", this describes its interface. XXX: Needs later conversion!
 	nullable::Bool # attribute, implied
@@ -88,7 +88,7 @@ Imply the "since" attribute, resolving to 1 if it's not present and valid.
 """
 imply_since(::Nothing) = 1
 imply_since(s::AbstractString) = (since = tryparse(WlVersion, s)) == nothing ? nothing : since
-function parse_wlmsgtype(ts::AbstractString)::TypeofAbstractWlMsgType
+function parse_wlmsgtype(ts::AbstractString)::TypeofWlMsgType
 	if ts == "int"
 		WlInt
 	elseif ts == "uint"
